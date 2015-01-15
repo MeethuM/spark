@@ -17,9 +17,9 @@
 
 from pyspark import SparkContext
 from pyspark.mllib.common import callMLlibFunc, callJavaFunc
-from pyspark.mllib.linalg import SparseVector, _convert_to_vector
+from pyspark.mllib.linalg import SparseVector, _convert_to_vector, DenseVector
 
-__all__ = ['KMeansModel', 'KMeans']
+__all__ = ['KMeansModel', 'KMeans', 'GaussianMixtureModel', 'GaussianMixtureEM']
 
 
 class KMeansModel(object):
@@ -84,6 +84,65 @@ class KMeans(object):
                               runs, initializationMode)
         centers = callJavaFunc(rdd.context, model.clusterCenters)
         return KMeansModel([c.toArray() for c in centers])
+
+
+class GaussianMixtureModel(object):
+
+    """A clustering model derived from the Gaussian Mixture Model method.
+
+    >>> from numpy import array
+    >>> clusterdata_1 =  sc.parallelize(array([0.683,0.543,0.685,0.551,
+    ...                               0.380,0.832,0.410,0.828])
+    ...                        .reshape(4,2))
+    >>> model = GaussianMixtureEM.train(clusterdata_1, 2, 0.0001, maxIterations=10)
+    >>> labels = model.predictLabels(clusterdata_1).collect()
+    >>> labels[0]==labels[1]
+    True
+    >>> labels[2]==labels[3]
+    True
+    >>> clusterdata_2 =  sc.parallelize(array([-0.1, -0.05, -0.01, -0.1,
+    ...                              0.9, 0.8, 0.75, 0.935,
+    ...                              -0.83, -0.68, -0.91, -0.76 ])
+    ...                         .reshape(6,2))
+    >>> model = GaussianMixtureEM.train(clusterdata_2, 3, 0.0001, maxIterations=10)
+    >>> labels = model.predictLabels(clusterdata_2).collect()
+    >>> labels[2]==labels[3]
+    True
+    >>> labels[4]==labels[5]
+    True
+    """
+
+    def __init__(self, weight, mu, sigma):
+        self.weight = weight
+        self.mu = mu
+        self.sigma = sigma
+
+    def predictLabels(self, X):
+        """
+        Find the cluster to which the points in X has maximum membership
+        in this model.
+        """
+        cluster_labels = self.predictSoft(X).map(lambda x: x.index(max(x)))
+        return cluster_labels
+
+    def predictSoft(self, X):
+        """
+        Find the membership of each point in X to all clusters in this model.
+        """
+        membership_matrix = callMLlibFunc("findPredict", X.map(_convert_to_vector),
+                                         self.weight, self.mu, self.sigma)
+        return membership_matrix
+
+
+class GaussianMixtureEM(object):
+
+    @classmethod
+    def train(cls, rdd, k, convergenceTol, maxIterations=100):
+        """Train a Gaussian Mixture clustering model."""
+        weight, mu, sigma = callMLlibFunc("trainGaussianMixtureEM",
+                                          rdd.map(_convert_to_vector), k,
+                                          convergenceTol, maxIterations)
+        return GaussianMixtureModel(weight, mu, sigma)
 
 
 def _test():
